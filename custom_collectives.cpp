@@ -14,214 +14,113 @@ Figure out sizes of input data + offsets and use this to create recv_data_ptr an
 THEN DO THE shit I started doing below off sending and recieving order based on rank
 */
 
-// int custom_many2many(int *send_data, int *sendcounts, int** recv_data_ptr, int rank, int size) {
-//     // ----------------------------------------------------------------
-//     //We need to know how many elements each other process will send to us.
-//     //From our perspective, the number of elements that process j sends to us is the jth element in their sendcount j
-//     //Imma create an array recv_counts of size size so that recv_counts[i] = number of elements process i sends to us.
-//     int* recv_counts = new int[size];
-//     recv_counts[rank] = sendcounts[rank]; // we send sendcounts[rank] to ourselves
-
-//     //(tag 1 for exchanging counts - we used 0 for hypercubic)
-//     //Loop over all processes and, for each process i != rank, exchange our info so we can fill in recv_counts
-//     //To avoid deadlock, we use the rank ordering:
-//     // - If our rank is lower than i, we send our count for process i first, then receive.
-//     // - If our rank is higher than i, we receive first, then send.
-//     for (int i = 0; i < size; i++) {
-//         if (i == rank) continue;  // Skip self
-//         if (rank < i) {
-//             //Rank is lower than i.
-//             //Send our count for process i to process i.
-//             MPI_Send(&sendcounts[i], 1, MPI_INT, i, 1, MPI_COMM_WORLD);
-//             //Recv from process i its count for destination rank - i.e. how much its about to send to us
-//             MPI_Recv(&recv_counts[i], 1, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-//         } else {
-//             //Our rank is higher than i.
-//             //Same shit in reverse order
-//             MPI_Recv(&recv_counts[i], 1, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-//             MPI_Send(&sendcounts[i], 1, MPI_INT, i, 1, MPI_COMM_WORLD);
-//         }
-//     }
-
-
-//     //Now recv_counts[i] holds the number of elements that process i sends to us.
-
-//     // ----------------------------------------------------------------
-//     //Now calculate the total number of elements that we will receive.
-//     //Also, we need to create an offsets array so that data from process i will be stored starting at offset[i] in our final receive buffer.
-//     //I.e. recall that data needs to be ordered, so we need to know offset.
-
-//     int total_recv = 0; //Total info recieved
-//     int* offsets = new int[size];
-//     for (int i = 0; i < size; i++) {
-//         offsets[i] = total_recv; //For messages from offsets[i]. we need to start from the amount of messages that have been sent before
-//         total_recv += recv_counts[i]; //Also increment total_recv
-//     }
-
-//     // Now actually build out recv data pointer
-//     *recv_data_ptr = new int[total_recv];
-//     int* recv_data = *recv_data_ptr; // Imma Use this to iterate over recv data ptr
-
-//     // ----------------------------------------------------------------
-//     //If we have sendcounts as [3,2]
-//     // And we have send_data as [1,2,3,4,5]
-//     //Then we send 1,2,3 to proc0 and 4,5 to proc 1
-//     //In order to facilitate this, we need to create local offsets into send_data too.
-//     int* local_offsets = new int[size]; // Offsets
-//     int local_total = 0; // Total data we are sending(should equal the sum total of sendcounts)
-//     for (int i = 0; i < size; i++) { //Offset for sending data to i is the amt of data sent before we get to i.
-//         local_offsets[i] = local_total;
-//         local_total += sendcounts[i];
-//     }
-
-//     // ----------------------------------------------------------------
-//     //Now actually perform Many-to-Many Data Exchange
-//     //We now exchange the actual data. For each process i (from 0 to size-1). RANK GIVEN AS 0 TO N-1
-//     //Need to send the data chunk destined for process i and receive the data chunk that i sending to us
-//     //Bcos of deadlocks, again, order the communication so that smaller ranks send then recieve.
-//     //Tag = 2 - used 1 for counts and 0 for hypercubic
-//     for (int i = 0; i < size; i++) {
-//         if (i == rank) {
-//             //For self: simply copy the data from our local send buffer to our receive buffer.
-//             //The data intended for ourselves is in send_data starting at local_offsets[rank]
-//             //and has sendcounts[rank] elements. We copy it to recv_data starting at offsets[rank].
-//             int prev_index = local_offsets[rank];
-//             int new_index = offsets[rank];
-//             for (int j = 0; j < sendcounts[rank]; j++) {
-//                 recv_data[new_index + j] = send_data[prev_index + j]; // Iterate through based on offset and deep copy over
-//             }
-//         } else {
-//             //Order the send/receive based on rank for communications w other procs
-//             if (rank < i) {
-//                 //If our rank is lower than i, send our data first and then receive.]
-//                 //Send -> send_data + local_offset so we know where to start from
-//                 //Sendcounts tells us how much to send
-//                 //MPT int is variable type
-//                 //i = destination/source (other proc)
-//                 //Tag = 2 - used 1 for counts and 0 for hypercubic
-//                 MPI_Send(send_data + local_offsets[i], sendcounts[i], MPI_INT, i, 2, MPI_COMM_WORLD);
-//                 MPI_Recv(recv_data + offsets[i], recv_counts[i], MPI_INT, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-//             } else {
-//                 // If our rank is higher than i, same stuff reverse order.
-//                 MPI_Recv(recv_data + offsets[i], recv_counts[i], MPI_INT, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-//                 MPI_Send(send_data + local_offsets[i], sendcounts[i], MPI_INT, i, 2, MPI_COMM_WORLD);
-//             }
-//         }
-//     }
-
-//     // ----------------------------------------------------------------
-//     //Clean up n free temporary arrays that are no longer needed.
-//     delete[] recv_counts;
-//     delete[] offsets;
-//     delete[] local_offsets;
-
-//     //Return the total number of elements received.
-//     return total_recv; // length of recv data arr
-// }
-
-
-//-----------------------------------------------------------------------------------------------------
-/*
-CUSTOM MANY2MANY
-IDEA:
-Send sendcounts to each other.
-Figure out sizes of input data + offsets and use this to create recv_data_ptr and create new array of offsets.
-(Then when you recv data, recv data into the specific offset of the recv_data_ptr)
-
-Then do the ordered sending and receiving based on rank.
-*/
-
 int custom_many2many(int *send_data, int *sendcounts, int** recv_data_ptr, int rank, int size) {
     // ----------------------------------------------------------------
-    // Step 1: Exchange Counts
-    // We need to know how many elements each other process will send to us.
-    // From our perspective, the number of elements that process j sends to us is the jth element in their sendcounts.
-    // Create an array recv_counts of size 'size' so that:
-    //   recv_counts[i] = number of elements process i sends to us.
+    //We need to know how many elements each other process will send to us.
+    //From our perspective, the number of elements that process j sends to us is the jth element in their sendcount j
+    //Imma create an array recv_counts of size size so that recv_counts[i] = number of elements process i sends to us.
     int* recv_counts = new int[size];
-    recv_counts[rank] = sendcounts[rank]; // For ourselves.
+    recv_counts[rank] = sendcounts[rank]; // we send sendcounts[rank] to ourselves
 
-    // (Tag 1 for exchanging counts)
-    // Loop over all processes (skip self) and exchange counts.
-    // Use rank ordering to avoid deadlock.
+    //(tag 1 for exchanging counts - we used 0 for hypercubic)
+    //Loop over all processes and, for each process i != rank, exchange our info so we can fill in recv_counts
+    //To avoid deadlock, we use the rank ordering:
+    // - If our rank is lower than i, we send our count for process i first, then receive.
+    // - If our rank is higher than i, we receive first, then send.
     for (int i = 0; i < size; i++) {
         if (i == rank) continue;  // Skip self
         if (rank < i) {
-            // Rank is lower than i: send our count for process i first, then receive.
+            //Rank is lower than i.
+            //Send our count for process i to process i.
             MPI_Send(&sendcounts[i], 1, MPI_INT, i, 1, MPI_COMM_WORLD);
+            //Recv from process i its count for destination rank - i.e. how much its about to send to us
             MPI_Recv(&recv_counts[i], 1, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         } else {
-            // Rank is higher than i: receive first, then send.
+            //Our rank is higher than i.
+            //Same shit in reverse order
             MPI_Recv(&recv_counts[i], 1, MPI_INT, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Send(&sendcounts[i], 1, MPI_INT, i, 1, MPI_COMM_WORLD);
         }
     }
-    // Now, recv_counts[i] holds the number of elements that process i sends to us.
+
+
+    //Now recv_counts[i] holds the number of elements that process i sends to us.
 
     // ----------------------------------------------------------------
-    // Step 2: Compute Total Receive Size and Offsets
-    int total_recv = 0; // Total data to be received.
-    int* offsets = new int[size]; // Offsets in the final buffer.
+    //Now calculate the total number of elements that we will receive.
+    //Also, we need to create an offsets array so that data from process i will be stored starting at offset[i] in our final receive buffer.
+    //I.e. recall that data needs to be ordered, so we need to know offset.
+
+    int total_recv = 0; //Total info recieved
+    int* offsets = new int[size];
     for (int i = 0; i < size; i++) {
-        offsets[i] = total_recv; // Data from process i will be placed starting here.
-        total_recv += recv_counts[i];
+        offsets[i] = total_recv; //For messages from offsets[i]. we need to start from the amount of messages that have been sent before
+        total_recv += recv_counts[i]; //Also increment total_recv
     }
 
-    // Allocate the final contiguous receive buffer.
+    // Now actually build out recv data pointer
     *recv_data_ptr = new int[total_recv];
-    int* recv_data = *recv_data_ptr; // Pointer to the receive buffer.
+    int* recv_data = *recv_data_ptr; // Imma Use this to iterate over recv data ptr
 
     // ----------------------------------------------------------------
-    // Step 3: Compute Local Offsets in the send_data Array
-    // Our send_data array is arranged by destination:
-    // first sendcounts[0] elements for process 0, then sendcounts[1] for process 1, etc.
-    // Compute local_offsets so that local_offsets[i] gives the starting index in send_data for process i.
-    int* local_offsets = new int[size];
-    int local_total = 0;
-    for (int i = 0; i < size; i++) {
+    //If we have sendcounts as [3,2]
+    // And we have send_data as [1,2,3,4,5]
+    //Then we send 1,2,3 to proc0 and 4,5 to proc 1
+    //In order to facilitate this, we need to create local offsets into send_data too.
+    int* local_offsets = new int[size]; // Offsets
+    int local_total = 0; // Total data we are sending(should equal the sum total of sendcounts)
+    for (int i = 0; i < size; i++) { //Offset for sending data to i is the amt of data sent before we get to i.
         local_offsets[i] = local_total;
         local_total += sendcounts[i];
     }
 
     // ----------------------------------------------------------------
-    // Step 4: Perform Many-to-Many Data Exchange
-    // Instead of a single loop from i = 0 to size-1, split the loop into two parts.
-    // This reordering (first for i > rank, then for i < rank) ensures that all processes
-    // perform similar communication steps concurrently and may reduce waiting time.
-
-    // 4a. Handle self-send first.
-    // Copy our own data from send_data to recv_data.
-    {
-        int src_index = local_offsets[rank];  // Starting index in send_data.
-        int dst_index = offsets[rank];          // Destination offset in recv_data.
-        for (int j = 0; j < sendcounts[rank]; j++) {
-            recv_data[dst_index + j] = send_data[src_index + j];
+    //Now actually perform Many-to-Many Data Exchange
+    //We now exchange the actual data. For each process i (from 0 to size-1). RANK GIVEN AS 0 TO N-1
+    //Need to send the data chunk destined for process i and receive the data chunk that i sending to us
+    //Bcos of deadlocks, again, order the communication so that smaller ranks send then recieve.
+    //Tag = 2 - used 1 for counts and 0 for hypercubic
+    for (int i = 0; i < size; i++) {
+        if (i == rank) {
+            //For self: simply copy the data from our local send buffer to our receive buffer.
+            //The data intended for ourselves is in send_data starting at local_offsets[rank]
+            //and has sendcounts[rank] elements. We copy it to recv_data starting at offsets[rank].
+            int prev_index = local_offsets[rank];
+            int new_index = offsets[rank];
+            for (int j = 0; j < sendcounts[rank]; j++) {
+                recv_data[new_index + j] = send_data[prev_index + j]; // Iterate through based on offset and deep copy over
+            }
+        } else {
+            //Order the send/receive based on rank for communications w other procs
+            if (rank < i) {
+                //If our rank is lower than i, send our data first and then receive.]
+                //Send -> send_data + local_offset so we know where to start from
+                //Sendcounts tells us how much to send
+                //MPT int is variable type
+                //i = destination/source (other proc)
+                //Tag = 2 - used 1 for counts and 0 for hypercubic
+                MPI_Send(send_data + local_offsets[i], sendcounts[i], MPI_INT, i, 2, MPI_COMM_WORLD);
+                MPI_Recv(recv_data + offsets[i], recv_counts[i], MPI_INT, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            } else {
+                // If our rank is higher than i, same stuff reverse order.
+                MPI_Recv(recv_data + offsets[i], recv_counts[i], MPI_INT, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(send_data + local_offsets[i], sendcounts[i], MPI_INT, i, 2, MPI_COMM_WORLD);
+            }
         }
     }
 
-    // 4b. First, handle all processes with rank greater than ours.
-    for (int i = rank + 1; i < size; i++) {
-        // Our rank is lower than i: send our data first, then receive.
-        MPI_Send(send_data + local_offsets[i], sendcounts[i], MPI_INT, i, 2, MPI_COMM_WORLD);
-        MPI_Recv(recv_data + offsets[i], recv_counts[i], MPI_INT, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    }
-    
-    // 4c. Next, handle all processes with rank lower than ours.
-    for (int i = 0; i < rank; i++) {
-        // Our rank is higher than i: receive first, then send.
-        MPI_Recv(recv_data + offsets[i], recv_counts[i], MPI_INT, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Send(send_data + local_offsets[i], sendcounts[i], MPI_INT, i, 2, MPI_COMM_WORLD);
-    }
-
     // ----------------------------------------------------------------
-    // Step 5: Clean Up Temporary Arrays
+    //Clean up n free temporary arrays that are no longer needed.
     delete[] recv_counts;
     delete[] offsets;
     delete[] local_offsets;
 
-    // Return the total number of elements received.
-    return total_recv; // This is the length of the recv_data array.
+    //Return the total number of elements received.
+    return total_recv; // length of recv data arr
 }
+
+
+
 
 void custom_allreduce_sum(int *local, int *global, int num_elem, int rank, int size) {
   //CHECK IF WE ARE AN EXTRA PROC SHOULD WE SKIP HYPERCUBIC
