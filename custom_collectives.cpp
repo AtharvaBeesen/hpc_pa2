@@ -220,7 +220,7 @@ void custom_allreduce_sum(int *local, int *global, int num_elem, int rank, int s
   //Now neeed to send the global result to extra processes (if any) -> recall we taked about this earlier when we were making extra procs
   //The designated main group processes send the final result to their corresponding extra proc.
   if (rank < extra_count) {
-      int dest = rank + m;  // Corresponding to this main process.
+      int dest = rank + main;  // Corresponding to this main process.
       MPI_Send(global, num_elem, MPI_INT, dest, 0, MPI_COMM_WORLD);
   }
 
