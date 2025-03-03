@@ -177,7 +177,7 @@ void custom_allreduce_sum(int *local, int *global, int num_elem, int rank, int s
   //In each round, each process exchanges its current partial sum with a partner (found via XORing the rank with 2^i for round i)
   //THen sum arrays
   int rounds = 0;
-  int temp = m;
+  int temp = main;
   while (temp > 1) { // Log base 2 finder lol
       rounds++;
       temp /= 2;
